@@ -13,6 +13,12 @@ enum FileKind {
 }
 
 #[derive(Debug)]
+enum Scope {
+    UserFolders,
+    Everywhere,
+}
+
+#[derive(Debug)]
 enum TimeRange {
     Any,
     Today,
@@ -28,6 +34,26 @@ enum TimeRange {
 struct FileQuery {
     kind: FileKind,
     time: TimeRange,
+    scope: Scope,
+}
+
+impl Scope {
+    fn roots(&self) -> Vec<PathBuf> {
+        match self {
+            Scope::Everywhere => dirs::home_dir().into_iter().collect(),
+            Scope::UserFolders => [
+                dirs::desktop_dir(),
+                dirs::document_dir(),
+                dirs::download_dir(),
+                dirs::picture_dir(),
+                dirs::video_dir(),
+                dirs::audio_dir(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+        }
+    }
 }
 
 impl FileKind {
@@ -119,35 +145,36 @@ fn is_hidden(entry: &DirEntry) -> bool {
 }
 
 fn search(q: &FileQuery) -> Vec<PathBuf> {
-    let home = std::env::var("HOME").expect("HOME is not set");
     let mut results = Vec::new();
 
     // Work out the dates once, before walking thousands of files.
     let range = q.time.range().map(|(s, e)| (s.timestamp(), e.timestamp()));
 
-    for entry in WalkDir::new(&home)
-        .into_iter()
-        .filter_entry(|e| !is_hidden(e))
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() || !q.kind.matches(entry.path()) {
-            continue;
-        }
-
-        if let Some((start, end)) = range {
-            let Ok(meta) = entry.metadata() else { continue };
-            let Ok(modified) = meta.modified() else {
-                continue;
-            };
-            let Ok(t) = Timestamp::try_from(modified) else {
-                continue;
-            };
-            if t < start || t >= end {
+    for root in q.scope.roots() {
+        for entry in WalkDir::new(&root)
+            .into_iter()
+            .filter_entry(|e| !is_hidden(e))
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_file() || !q.kind.matches(entry.path()) {
                 continue;
             }
-        }
 
-        results.push(entry.into_path());
+            if let Some((start, end)) = range {
+                let Ok(meta) = entry.metadata() else { continue };
+                let Ok(modified) = meta.modified() else {
+                    continue;
+                };
+                let Ok(t) = Timestamp::try_from(modified) else {
+                    continue;
+                };
+                if t < start || t >= end {
+                    continue;
+                }
+            }
+
+            results.push(entry.into_path());
+        }
     }
     results
 }
@@ -158,6 +185,7 @@ fn parse(input: &str) -> FileQuery {
 
     let mut kind = FileKind::Any;
     let mut time = TimeRange::Any;
+    let mut scope = Scope::UserFolders;
     let mut number: Option<u32> = None;
     let mut prev = "";
 
@@ -171,6 +199,7 @@ fn parse(input: &str) -> FileQuery {
                 kind = FileKind::Images
             }
             "pptx" | "slides" | "presentation" | "presentations" => kind = FileKind::Pptx,
+            "everywhere" | "anywhere" => scope = Scope::Everywhere,
             _ => {}
         }
 
@@ -199,7 +228,7 @@ fn parse(input: &str) -> FileQuery {
         prev = word;
     }
 
-    FileQuery { kind, time }
+    FileQuery { kind, time, scope }
 }
 
 fn main() {
