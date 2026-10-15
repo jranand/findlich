@@ -1,0 +1,15 @@
+# Rust build output
+/target
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS clutter
+.DS_Store
+
+# Local environment / secrets
+.env
