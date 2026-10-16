@@ -242,7 +242,11 @@ fn build_ui(app: &adw::Application) {
     // --- Esc: close ---
     {
         let window = window.clone();
-        entry.connect_stop_search(move |_| window.close());
+        entry.connect_stop_search(glib::clone!(
+            #[weak]
+            window,
+            move |_| window.close()
+        ));
     }
 
     window.present();
