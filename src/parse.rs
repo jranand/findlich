@@ -56,6 +56,9 @@ fn kind_word(word: &str) -> Option<FileKind> {
         "doc" | "docs" => Some(FileKind::Docx),
         "markdown" => Some(FileKind::Markdown),
         "image" | "images" | "photo" | "photos" | "picture" | "pictures" => Some(FileKind::Images),
+        "audio" | "music" | "song" | "songs" | "track" | "tracks" => Some(FileKind::Audio),
+        "video" | "videos" | "movie" | "movies" | "clip" | "clips" | "recording"
+        | "recordings" => Some(FileKind::Video),
         "slides" | "presentation" | "presentations" => Some(FileKind::Pptx),
         // Exact extensions: just that type.
         "jpg" => Some(FileKind::Ext("jpg")),
@@ -70,7 +73,18 @@ fn kind_word(word: &str) -> Option<FileKind> {
         "pptx" => Some(FileKind::Ext("pptx")),
         "ppt" => Some(FileKind::Ext("ppt")),
         "odp" => Some(FileKind::Ext("odp")),
-        "md" => Some(FileKind::Ext("md")),
+        "md" => Some(FileKind::Ext("md")),  
+        "mp3" => Some(FileKind::Ext("mp3")),
+        "flac" => Some(FileKind::Ext("flac")),
+        "wav" => Some(FileKind::Ext("wav")),
+        "ogg" => Some(FileKind::Ext("ogg")),
+        "opus" => Some(FileKind::Ext("opus")),
+        "m4a" => Some(FileKind::Ext("m4a")),
+        "mp4" => Some(FileKind::Ext("mp4")),
+        "mkv" => Some(FileKind::Ext("mkv")),
+        "webm" => Some(FileKind::Ext("webm")),
+        "mov" => Some(FileKind::Ext("mov")),
+        "avi" => Some(FileKind::Ext("avi")),
         _ => None,
     }
 }
@@ -88,7 +102,6 @@ fn folder_word(prev: &str, word: &str) -> Option<UserFolder> {
         _ => None,
     }
 }
-
 
 fn time_words(prev: &str, word: &str) -> Option<TimeRange> {
     match (prev, word) {

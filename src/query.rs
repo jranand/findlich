@@ -8,7 +8,14 @@ pub enum FileKind {
     Docx,
     Markdown,
     Images,
-    Ext(&'static str), 
+    Audio,
+    Video,
+    Ext(&'static str),
+}
+
+pub struct Resolved {
+    pub roots: Vec<PathBuf>,
+    pub range: Option<(Zoned, Zoned)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,6 +110,14 @@ impl FileKind {
             FileKind::Docx => &["docx", "doc", "odt"],
             FileKind::Markdown => &["md"],
             FileKind::Images => &["jpg", "jpeg", "png", "webp", "gif", "heic", "svg"],
+             FileKind::Audio => &[
+                "mp3", "flac", "wav", "ogg", "oga", "opus", "m4a", "aac", "aif", "aiff", "wma",
+                "mid", "midi",
+            ],
+            FileKind::Video => &[
+                "mp4", "mkv", "webm", "mov", "avi", "m4v", "wmv", "flv", "mpg", "mpeg", "ogv",
+                "3gp",
+            ],
             FileKind::Ext(e) => std::slice::from_ref(e),
         }
     }
@@ -121,8 +136,7 @@ impl FileKind {
 impl TimeRange {
     /// Turn a period into exact (start, end) moments in local time.
     /// None means "no time limit".
-    pub fn range(&self) -> Option<(Zoned, Zoned)> {
-        let now = Zoned::now();
+    pub fn range(&self, now: &Zoned) -> Option<(Zoned, Zoned)> {
         let today = now.start_of_day().expect("date math");
         let tomorrow = today.checked_add(1.day()).expect("date math");
         let monday = today
@@ -143,21 +157,18 @@ impl TimeRange {
             ),
             TimeRange::PastDays(n) => (
                 now.checked_sub(i64::from(*n).days()).expect("date math"),
-                tomorrow,
+                now.clone(), // a rolling window ends now, not tomorrow
             ),
         };
         Some(range)
     }
 }
 
-
-
 impl FileQuery {
     // The "Show specs" idea: every query can explain itself as a real command.
-    pub fn to_find_command(&self) -> String {
-        let roots: Vec<String> = self
-            .scope
-            .roots()
+    pub fn to_find_command(&self, plan: &Resolved) -> String {
+        let roots: Vec<String> = plan
+            .roots
             .iter()
             .map(|p| shell_quote(&p.display().to_string()))
             .collect();
@@ -177,7 +188,8 @@ impl FileQuery {
         for term in &self.name_terms {
             cmd.push_str(&format!(" -iname '*{term}*'"));
         }
-        if let Some((start, end)) = self.time.range() {
+
+        if let Some((start, end)) = &plan.range {
             cmd.push_str(&format!(
                 " -newermt '{}' ! -newermt '{}'",
                 start.strftime("%Y-%m-%d %H:%M"),
@@ -201,5 +213,17 @@ impl FileQuery {
         };
         let name = name.to_lowercase();
         self.name_terms.iter().all(|t| name.contains(t.as_str()))
+    }
+
+    pub fn resolve(&self) -> Resolved {
+        self.resolve_at(&Zoned::now())
+    }
+
+    /// Same, for a chosen moment (used by tests).
+    pub fn resolve_at(&self, now: &Zoned) -> Resolved {
+        Resolved {
+            roots: self.scope.roots(),
+            range: self.time.range(now),
+        }
     }
 }

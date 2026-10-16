@@ -1,4 +1,4 @@
-use crate::query::FileQuery;
+use crate::query::{FileQuery, Resolved, UserFolder};
 use ignore::WalkBuilder;
 use jiff::Timestamp;
 use std::collections::BTreeMap;
@@ -17,7 +17,6 @@ const DEPENDENCY_DIRS: &[&str] = &[
 const TOOL_DIRS: &[&str] = &["go/pkg", "snap", "miniconda3", "anaconda3", "Android/Sdk"];
 
 /// Generic names, skipped only when a project file sits next to them.
-/// A user's own folder called "build" stays searchable.
 const BUILD_DIRS: &[(&str, &[&str])] = &[
     ("target", &["Cargo.toml"]),
     (
@@ -61,7 +60,12 @@ pub struct Index {
     skipped: BTreeMap<&'static str, usize>,
 }
 
-/// Why a folder should not be indexed, or None to index it.
+/// The first `limit` matches (newest first), plus how many matched in total.
+pub struct SearchResult<'a> {
+    pub matches: Vec<&'a IndexedFile>,
+    pub total: usize,
+}
+
 fn skip_dir_reason(path: &Path, home: &Path) -> Option<&'static str> {
     let name = path.file_name()?.to_str()?;
 
@@ -73,11 +77,9 @@ fn skip_dir_reason(path: &Path, home: &Path) -> Option<&'static str> {
             return Some("tool data");
         }
     }
-    // Standard marker: "this folder is regenerable cache".
     if path.join("CACHEDIR.TAG").exists() {
         return Some("cache");
     }
-    // Every Python virtual environment contains this file.
     if path.join("pyvenv.cfg").exists() {
         return Some("python environment");
     }
@@ -100,7 +102,7 @@ fn is_machine_file(path: &Path) -> bool {
 }
 
 impl Index {
-    /// Walk the home folder once and remember the files a person might look for.
+    /// Walk home (and any user folders kept elsewhere) once.
     pub fn build() -> Index {
         let mut files = Vec::new();
         let Some(home) = dirs::home_dir() else {
@@ -111,16 +113,25 @@ impl Index {
         };
 
         let mut walker = WalkBuilder::new(&home);
-        walker
-            .hidden(true) // skip dotfiles and dot-folders (~/.ssh, ~/.cache, ...)
-            .git_ignore(true) // respect .gitignore inside projects
-            .require_git(false) // ...even in folders that aren't git repos
-            .git_global(false) // ignore personal git config: predictable for everyone
-            .git_exclude(false)
-            .parents(false) // never read ignore files above ~
-            .add_custom_ignore_filename(".hidden"); // GNOME file-manager convention
 
-        // The user's own rules, in .gitignore syntax.
+        // User folders that live outside home, e.g. Documents on another drive.
+        for folder in UserFolder::ALL {
+            if let Some(path) = folder.path() {
+                if !path.starts_with(&home) && path.is_dir() {
+                    walker.add(path);
+                }
+            }
+        }
+
+        walker
+            .hidden(true)
+            .git_ignore(true)
+            .require_git(false)
+            .git_global(false)
+            .git_exclude(false)
+            .parents(false)
+            .add_custom_ignore_filename(".hidden");
+
         if let Some(config) = dirs::config_dir() {
             let user_rules = config.join("findlich/ignore");
             if user_rules.exists() {
@@ -130,7 +141,6 @@ impl Index {
             }
         }
 
-        // Count what our own rules skip, so we can report it honestly.
         let skipped = Arc::new(Mutex::new(BTreeMap::new()));
         {
             let skipped = Arc::clone(&skipped);
@@ -150,7 +160,16 @@ impl Index {
             });
         }
 
-        for entry in walker.build().filter_map(Result::ok) {
+        let mut unreadable = 0;
+        for result in walker.build() {
+            // A folder we're not allowed to read: count it, don't hide it.
+            let entry = match result {
+                Ok(entry) => entry,
+                Err(_) => {
+                    unreadable += 1;
+                    continue;
+                }
+            };
             if !entry.file_type().is_some_and(|t| t.is_file()) || is_machine_file(entry.path()) {
                 continue;
             }
@@ -166,10 +185,12 @@ impl Index {
             });
         }
 
-        // Newest first: every search keeps this order for free.
         files.sort_by(|a, b| b.modified.cmp(&a.modified));
 
-        let skipped = std::mem::take(&mut *skipped.lock().unwrap());
+        let mut skipped = std::mem::take(&mut *skipped.lock().unwrap());
+        if unreadable > 0 {
+            skipped.insert("unreadable", unreadable);
+        }
         Index { files, skipped }
     }
 
@@ -177,24 +198,37 @@ impl Index {
         self.files.len()
     }
 
-    /// Folders skipped by Findlich's own rules, counted by reason.
     pub fn skipped(&self) -> &BTreeMap<&'static str, usize> {
         &self.skipped
     }
 
-    pub fn search(&self, q: &FileQuery) -> Vec<&IndexedFile> {
-        let range = q.time.range().map(|(s, e)| (s.timestamp(), e.timestamp()));
-        let roots = q.scope.roots();
+    /// One pass over the index: keep the first `limit` matches, count them all.
+    pub fn search(&self, q: &FileQuery, plan: &Resolved, limit: usize) -> SearchResult<'_> {
+        let range = plan
+            .range
+            .as_ref()
+            .map(|(s, e)| (s.timestamp(), e.timestamp()));
 
-        self.files
-            .iter()
-            .filter(|f| roots.iter().any(|r| f.path.starts_with(r)))
-            .filter(|f| q.matches_kind(&f.path))
-            .filter(|f| q.matches_name(&f.path))
-            .filter(|f| match range {
-                None => true,
-                Some((start, end)) => f.modified.is_some_and(|t| start <= t && t < end),
-            })
-            .collect()
+        let mut matches = Vec::with_capacity(limit);
+        let mut total = 0;
+
+        for f in &self.files {
+            let wanted = plan.roots.iter().any(|r| f.path.starts_with(r))
+                && q.matches_kind(&f.path)
+                && q.matches_name(&f.path)
+                && match range {
+                    None => true,
+                    Some((start, end)) => f.modified.is_some_and(|t| start <= t && t < end),
+                };
+
+            if wanted {
+                total += 1;
+                if matches.len() < limit {
+                    matches.push(f);
+                }
+            }
+        }
+
+        SearchResult { matches, total }
     }
 }

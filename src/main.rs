@@ -13,15 +13,16 @@ fn main() {
     println!("  (plus anything listed in .gitignore files)");
 
     let q = parse(&input);
+    let plan = q.resolve();
     println!("{q:?}");
-    println!("  → {}\n", q.to_find_command());
+    println!("  → {}\n", q.to_find_command(&plan));
 
     let started = Instant::now();
-    let results = index.search(&q);
+    let result = index.search(&q, &plan, 20);
     println!("Searched in {:?}\n", started.elapsed());
 
-    for f in results.iter().take(20) {
+    for f in &result.matches {
         println!("{}", f.path.display());
     }
-    println!("\n{} files found", results.len());
+    println!("\n{} files found", result.total);
 }

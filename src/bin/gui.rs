@@ -116,23 +116,24 @@ fn run_search(ui: &Ui, index: &Option<Index>, text: &str) {
     }
 
     let q = parse(text);
-    let cmd = q.to_find_command();
+    let plan = q.resolve();
+    let cmd = q.to_find_command(&plan);
     ui.command.set_label(&cmd);
     ui.command.set_tooltip_text(Some(&cmd));
 
-    let results = index.search(&q);
-    for f in results.iter().take(MAX_RESULTS) {
+    let result = index.search(&q, &plan, MAX_RESULTS);
+    for f in &result.matches {
         ui.list.append(&file_row(&f.path));
     }
 
-    ui.count.set_label(&match results.len() {
+    ui.count.set_label(&match result.total {
         0 => "No files".to_string(),
         1 => "1 file".to_string(),
         n if n > MAX_RESULTS => format!("{MAX_RESULTS} of {n} files"),
         n => format!("{n} files"),
     });
 
-    if results.is_empty() {
+    if result.total == 0 {
         show_status(ui, "No files found", "Try fewer words, or add “everywhere”");
     } else {
         ui.stack.set_visible_child_name("results");
