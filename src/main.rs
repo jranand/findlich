@@ -1,4 +1,4 @@
-use cmdcenter::{parse::parse, search::search};
+use findlich::{parse::parse, search::search};
 
 fn main() {
     let input = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
