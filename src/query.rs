@@ -34,6 +34,7 @@ pub struct FileQuery {
     pub kind: FileKind,
     pub time: TimeRange,
     pub scope: Scope,
+    pub name_terms: Vec<String>,
 }
 
 impl Scope {
@@ -128,6 +129,9 @@ impl FileQuery {
             let parts: Vec<String> = exts.iter().map(|e| format!("-iname '*.{e}'")).collect();
             cmd.push_str(&format!(" \\( {} \\)", parts.join(" -o ")));
         }
+        for term in &self.name_terms {
+            cmd.push_str(&format!(" -iname '*{term}*'"));
+        }
         if let Some((start, end)) = self.time.range() {
             cmd.push_str(&format!(
                 " -newermt '{}' ! -newermt '{}'",
@@ -137,5 +141,16 @@ impl FileQuery {
         }
 
         cmd
+    }
+
+    pub fn matches_name(&self, path: &Path) -> bool {
+        if self.name_terms.is_empty() {
+            return true;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            return false;
+        };
+        let name = name.to_lowercase();
+        self.name_terms.iter().all(|t| name.contains(t.as_str()))
     }
 }
