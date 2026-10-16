@@ -57,8 +57,9 @@ fn kind_word(word: &str) -> Option<FileKind> {
         "markdown" => Some(FileKind::Markdown),
         "image" | "images" | "photo" | "photos" | "picture" | "pictures" => Some(FileKind::Images),
         "audio" | "music" | "song" | "songs" | "track" | "tracks" => Some(FileKind::Audio),
-        "video" | "videos" | "movie" | "movies" | "clip" | "clips" | "recording"
-        | "recordings" => Some(FileKind::Video),
+        "video" | "videos" | "movie" | "movies" | "clip" | "clips" | "recording" | "recordings" => {
+            Some(FileKind::Video)
+        }
         "slides" | "presentation" | "presentations" => Some(FileKind::Pptx),
         // Exact extensions: just that type.
         "jpg" => Some(FileKind::Ext("jpg")),
@@ -73,7 +74,7 @@ fn kind_word(word: &str) -> Option<FileKind> {
         "pptx" => Some(FileKind::Ext("pptx")),
         "ppt" => Some(FileKind::Ext("ppt")),
         "odp" => Some(FileKind::Ext("odp")),
-        "md" => Some(FileKind::Ext("md")),  
+        "md" => Some(FileKind::Ext("md")),
         "mp3" => Some(FileKind::Ext("mp3")),
         "flac" => Some(FileKind::Ext("flac")),
         "wav" => Some(FileKind::Ext("wav")),
@@ -211,5 +212,20 @@ pub fn parse(input: &str) -> FileQuery {
         time,
         scope,
         name_terms,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::query::{FileKind, Scope, TimeRange};
+
+    #[test]
+    fn pdf_last_week() {
+        let q = parse("pdf last week");
+        assert_eq!(q.kinds, vec![FileKind::Pdf]);
+        assert_eq!(q.time, TimeRange::LastWeek);
+        assert_eq!(q.scope, Scope::UserFolders);
+        assert!(q.name_terms.is_empty());
     }
 }

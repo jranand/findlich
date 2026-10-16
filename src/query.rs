@@ -28,14 +28,14 @@ pub enum UserFolder {
     Videos,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Scope {
     UserFolders,              // all standard folders (default)
     Folders(Vec<UserFolder>), // only the ones the user named
     Everywhere,               // all of ~
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TimeRange {
     Any,
     Today,
@@ -81,7 +81,6 @@ impl UserFolder {
         }
     }
 }
-
 impl Scope {
     pub fn roots(&self) -> Vec<PathBuf> {
         let mut roots: Vec<PathBuf> = match self {
@@ -110,7 +109,7 @@ impl FileKind {
             FileKind::Docx => &["docx", "doc", "odt"],
             FileKind::Markdown => &["md"],
             FileKind::Images => &["jpg", "jpeg", "png", "webp", "gif", "heic", "svg"],
-             FileKind::Audio => &[
+            FileKind::Audio => &[
                 "mp3", "flac", "wav", "ogg", "oga", "opus", "m4a", "aac", "aif", "aiff", "wma",
                 "mid", "midi",
             ],
