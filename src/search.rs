@@ -24,7 +24,10 @@ pub fn search(q: &FileQuery) -> Vec<PathBuf> {
             .filter_entry(|e| !is_hidden(e))
             .filter_map(|e| e.ok())
         {
-            if !entry.file_type().is_file() || !q.kind.matches(entry.path()) || !q.matches_name(entry.path()) {
+            if !entry.file_type().is_file()
+                || !q.kind.matches(entry.path())
+                || !q.matches_name(entry.path())
+            {
                 continue;
             }
 

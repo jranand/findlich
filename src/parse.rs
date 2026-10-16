@@ -55,17 +55,23 @@ pub fn parse(input: &str) -> FileQuery {
     let mut number: Option<u32> = None;
     let mut prev = "";
 
-    for &word in &words {
+    for (i, &word) in words.iter().enumerate() {
+        let next = words.get(i + 1).copied().unwrap_or("");
         let found_kind = kind_word(word);
         let found_scope = scope_word(word);
         let mut found_time = time_words(prev, word);
 
         // Rolling window: a number followed by days/weeks.
         if let Some(n) = number {
-            match word {
-                "day" | "days" => found_time = Some(TimeRange::PastDays(n)),
-                "week" | "weeks" => found_time = Some(TimeRange::PastDays(n.saturating_mul(7))),
-                _ => {}
+            let days = match word {
+                "day" | "days" => Some(n),
+                "week" | "weeks" => Some(n.saturating_mul(7)),
+                "month" | "months" => Some(n.saturating_mul(30)),
+                "year" | "years" => Some(n.saturating_mul(365)),
+                _ => None,
+            };
+            if let Some(d) = days {
+                found_time = Some(TimeRange::PastDays(d.min(36_500)));
             }
         }
 
@@ -74,7 +80,11 @@ pub fn parse(input: &str) -> FileQuery {
         let used = found_kind.is_some()
             || found_scope.is_some()
             || found_time.is_some()
-            || this_number.is_some()
+            || (this_number.is_some()
+                && matches!(
+                    next,
+                    "day" | "days" | "week" | "weeks" | "month" | "months" | "year" | "years"
+                ))
             || FILLER.contains(&word);
 
         if let Some(k) = found_kind {

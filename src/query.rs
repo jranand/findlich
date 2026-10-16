@@ -41,17 +41,24 @@ impl Scope {
     pub fn roots(&self) -> Vec<PathBuf> {
         match self {
             Scope::Everywhere => dirs::home_dir().into_iter().collect(),
-            Scope::UserFolders => [
-                dirs::desktop_dir(),
-                dirs::document_dir(),
-                dirs::download_dir(),
-                dirs::picture_dir(),
-                dirs::video_dir(),
-                dirs::audio_dir(),
-            ]
-            .into_iter()
-            .flatten()
-            .collect(),
+            Scope::UserFolders => {
+                let home = dirs::home_dir();
+                let mut roots: Vec<PathBuf> = [
+                    dirs::desktop_dir(),
+                    dirs::document_dir(),
+                    dirs::download_dir(),
+                    dirs::picture_dir(),
+                    dirs::video_dir(),
+                    dirs::audio_dir(),
+                ]
+                .into_iter()
+                .flatten()
+                .filter(|p| home.as_ref() != Some(p)) // never the whole home
+                .collect();
+                roots.sort();
+                roots.dedup(); // two settings pointing at one folder
+                roots
+            }
         }
     }
 }
@@ -60,10 +67,10 @@ impl FileKind {
     fn extensions(&self) -> &'static [&'static str] {
         match self {
             FileKind::Pdf => &["pdf"],
-            FileKind::Pptx => &["pptx"],
-            FileKind::Docx => &["docx"],
+            FileKind::Pptx => &["pptx", "ppt", "odp"],
+            FileKind::Docx => &["docx", "doc", "odt"],
             FileKind::Markdown => &["md"],
-            FileKind::Images => &["jpg", "jpeg", "png", "webp"],
+            FileKind::Images => &["jpg", "jpeg", "png", "webp", "gif", "heic", "svg"],
             FileKind::Any => &[],
         }
     }
