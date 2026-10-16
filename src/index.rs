@@ -189,7 +189,7 @@ impl Index {
         self.files
             .iter()
             .filter(|f| roots.iter().any(|r| f.path.starts_with(r)))
-            .filter(|f| q.kind.matches(&f.path))
+            .filter(|f| q.matches_kind(&f.path))
             .filter(|f| q.matches_name(&f.path))
             .filter(|f| match range {
                 None => true,

@@ -1,29 +1,94 @@
-use crate::query::{FileKind, FileQuery, Scope, TimeRange};
+use crate::query::{FileKind, FileQuery, Scope, TimeRange, UserFolder};
 
 const FILLER: &[&str] = &[
-    "a", "all", "and", "file", "files", "find", "for", "from", "in", "last", "me", "my", "of",
-    "past", "previous", "show", "the", "this", "with",
+    "a",
+    "all",
+    "an",
+    "and",
+    "any",
+    "are",
+    "at",
+    "by",
+    "called",
+    "changed",
+    "created",
+    "document",
+    "documents",
+    "edited",
+    "file",
+    "files",
+    "find",
+    "folder",
+    "folders",
+    "for",
+    "from",
+    "in",
+    "inside",
+    "is",
+    "last",
+    "me",
+    "modified",
+    "my",
+    "named",
+    "of",
+    "on",
+    "opened",
+    "or",
+    "past",
+    "previous",
+    "saved",
+    "show",
+    "that",
+    "the",
+    "this",
+    "to",
+    "under",
+    "was",
+    "were",
+    "which",
+    "with",
 ];
 
 fn kind_word(word: &str) -> Option<FileKind> {
     match word {
+        // Categories: the whole group.
         "pdf" | "pdfs" => Some(FileKind::Pdf),
-        "doc" | "docs" | "docx" => Some(FileKind::Docx),
-        "md" | "markdown" => Some(FileKind::Markdown),
-        "jpg" | "jpeg" | "png" | "webp" | "image" | "images" | "photos" | "pictures" => {
-            Some(FileKind::Images)
-        }
-        "pptx" | "slides" | "presentation" | "presentations" => Some(FileKind::Pptx),
+        "doc" | "docs" => Some(FileKind::Docx),
+        "markdown" => Some(FileKind::Markdown),
+        "image" | "images" | "photo" | "photos" | "picture" | "pictures" => Some(FileKind::Images),
+        "slides" | "presentation" | "presentations" => Some(FileKind::Pptx),
+        // Exact extensions: just that type.
+        "jpg" => Some(FileKind::Ext("jpg")),
+        "jpeg" => Some(FileKind::Ext("jpeg")),
+        "png" => Some(FileKind::Ext("png")),
+        "webp" => Some(FileKind::Ext("webp")),
+        "gif" => Some(FileKind::Ext("gif")),
+        "svg" => Some(FileKind::Ext("svg")),
+        "heic" => Some(FileKind::Ext("heic")),
+        "docx" => Some(FileKind::Ext("docx")),
+        "odt" => Some(FileKind::Ext("odt")),
+        "pptx" => Some(FileKind::Ext("pptx")),
+        "ppt" => Some(FileKind::Ext("ppt")),
+        "odp" => Some(FileKind::Ext("odp")),
+        "md" => Some(FileKind::Ext("md")),
         _ => None,
     }
 }
 
-fn scope_word(word: &str) -> Option<Scope> {
+/// Folder words. Ambiguous ones only count after a place word ("in pictures").
+fn folder_word(prev: &str, word: &str) -> Option<UserFolder> {
+    let after_place_word = matches!(prev, "in" | "from" | "inside" | "under" | "on");
     match word {
-        "everywhere" | "anywhere" => Some(Scope::Everywhere),
+        "desktop" => Some(UserFolder::Desktop),
+        "download" | "downloads" => Some(UserFolder::Downloads),
+        "documents" if after_place_word => Some(UserFolder::Documents),
+        "pictures" if after_place_word => Some(UserFolder::Pictures),
+        "music" if after_place_word => Some(UserFolder::Music),
+        "videos" if after_place_word => Some(UserFolder::Videos),
         _ => None,
     }
 }
+
 
 fn time_words(prev: &str, word: &str) -> Option<TimeRange> {
     match (prev, word) {
@@ -47,9 +112,10 @@ pub fn parse(input: &str) -> FileQuery {
         .filter(|w| !w.is_empty())
         .collect();
 
-    let mut kind = FileKind::Any;
+    let mut kinds: Vec<FileKind> = Vec::new();
+    let mut folders: Vec<UserFolder> = Vec::new();
+    let mut everywhere = false;
     let mut time = TimeRange::Any;
-    let mut scope = Scope::UserFolders;
     let mut name_terms = Vec::new();
 
     let mut number: Option<u32> = None;
@@ -57,11 +123,18 @@ pub fn parse(input: &str) -> FileQuery {
 
     for (i, &word) in words.iter().enumerate() {
         let next = words.get(i + 1).copied().unwrap_or("");
-        let found_kind = kind_word(word);
-        let found_scope = scope_word(word);
+
+        let found_folder = folder_word(prev, word);
+        // A folder word is never also a file type: "pdf in pictures".
+        let found_kind = if found_folder.is_some() {
+            None
+        } else {
+            kind_word(word)
+        };
+        let is_everywhere = matches!(word, "everywhere" | "anywhere");
         let mut found_time = time_words(prev, word);
 
-        // Rolling window: a number followed by days/weeks.
+        // Rolling window: a number followed by a unit.
         if let Some(n) = number {
             let days = match word {
                 "day" | "days" => Some(n),
@@ -76,27 +149,35 @@ pub fn parse(input: &str) -> FileQuery {
         }
 
         let this_number = word.parse::<u32>().ok();
+        let is_count = this_number.is_some()
+            && matches!(
+                next,
+                "day" | "days" | "week" | "weeks" | "month" | "months" | "year" | "years"
+            );
 
         let used = found_kind.is_some()
-            || found_scope.is_some()
+            || found_folder.is_some()
+            || is_everywhere
             || found_time.is_some()
-            || (this_number.is_some()
-                && matches!(
-                    next,
-                    "day" | "days" | "week" | "weeks" | "month" | "months" | "year" | "years"
-                ))
+            || is_count
             || FILLER.contains(&word);
 
         if let Some(k) = found_kind {
-            kind = k;
+            if !kinds.contains(&k) {
+                kinds.push(k);
+            }
         }
-        if let Some(s) = found_scope {
-            scope = s;
+        if let Some(f) = found_folder {
+            if !folders.contains(&f) {
+                folders.push(f);
+            }
         }
+        everywhere |= is_everywhere;
         if let Some(t) = found_time {
             time = t;
         }
-        if !used {
+        // Single letters (the "s" in "report's") are too vague to search for.
+        if !used && word.chars().count() > 1 {
             name_terms.push(word.to_string());
         }
 
@@ -104,8 +185,16 @@ pub fn parse(input: &str) -> FileQuery {
         prev = word;
     }
 
+    let scope = if everywhere {
+        Scope::Everywhere
+    } else if !folders.is_empty() {
+        Scope::Folders(folders)
+    } else {
+        Scope::UserFolders
+    };
+
     FileQuery {
-        kind,
+        kinds,
         time,
         scope,
         name_terms,

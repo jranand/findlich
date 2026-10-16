@@ -1,20 +1,31 @@
 use jiff::{ToSpan, Zoned};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FileKind {
     Pdf,
     Pptx,
     Docx,
     Markdown,
     Images,
-    Any,
+    Ext(&'static str), 
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UserFolder {
+    Desktop,
+    Documents,
+    Downloads,
+    Pictures,
+    Music,
+    Videos,
 }
 
 #[derive(Debug)]
 pub enum Scope {
-    UserFolders,
-    Everywhere,
+    UserFolders,              // all standard folders (default)
+    Folders(Vec<UserFolder>), // only the ones the user named
+    Everywhere,               // all of ~
 }
 
 #[derive(Debug)]
@@ -31,59 +42,79 @@ pub enum TimeRange {
 
 #[derive(Debug)]
 pub struct FileQuery {
-    pub kind: FileKind,
+    pub kinds: Vec<FileKind>,
     pub time: TimeRange,
     pub scope: Scope,
     pub name_terms: Vec<String>,
 }
 
-impl Scope {
-    pub fn roots(&self) -> Vec<PathBuf> {
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+impl UserFolder {
+    pub const ALL: [UserFolder; 6] = [
+        UserFolder::Desktop,
+        UserFolder::Documents,
+        UserFolder::Downloads,
+        UserFolder::Pictures,
+        UserFolder::Music,
+        UserFolder::Videos,
+    ];
+
+    /// Where this folder really is, from the user's XDG settings.
+    pub fn path(self) -> Option<PathBuf> {
         match self {
-            Scope::Everywhere => dirs::home_dir().into_iter().collect(),
-            Scope::UserFolders => {
-                let home = dirs::home_dir();
-                let mut roots: Vec<PathBuf> = [
-                    dirs::desktop_dir(),
-                    dirs::document_dir(),
-                    dirs::download_dir(),
-                    dirs::picture_dir(),
-                    dirs::video_dir(),
-                    dirs::audio_dir(),
-                ]
-                .into_iter()
-                .flatten()
-                .filter(|p| home.as_ref() != Some(p)) // never the whole home
-                .collect();
-                roots.sort();
-                roots.dedup(); // two settings pointing at one folder
-                roots
-            }
+            UserFolder::Desktop => dirs::desktop_dir(),
+            UserFolder::Documents => dirs::document_dir(),
+            UserFolder::Downloads => dirs::download_dir(),
+            UserFolder::Pictures => dirs::picture_dir(),
+            UserFolder::Music => dirs::audio_dir(),
+            UserFolder::Videos => dirs::video_dir(),
         }
     }
 }
 
+impl Scope {
+    pub fn roots(&self) -> Vec<PathBuf> {
+        let mut roots: Vec<PathBuf> = match self {
+            Scope::Everywhere => dirs::home_dir().into_iter().collect(),
+            Scope::Folders(folders) => folders.iter().filter_map(|f| f.path()).collect(),
+            Scope::UserFolders => {
+                let home = dirs::home_dir();
+                UserFolder::ALL
+                    .iter()
+                    .filter_map(|f| f.path())
+                    .filter(|p| home.as_ref() != Some(p)) // never the whole home
+                    .collect()
+            }
+        };
+        roots.sort();
+        roots.dedup();
+        roots
+    }
+}
+
 impl FileKind {
-    fn extensions(&self) -> &'static [&'static str] {
+    fn extensions(&self) -> &[&'static str] {
         match self {
             FileKind::Pdf => &["pdf"],
             FileKind::Pptx => &["pptx", "ppt", "odp"],
             FileKind::Docx => &["docx", "doc", "odt"],
             FileKind::Markdown => &["md"],
             FileKind::Images => &["jpg", "jpeg", "png", "webp", "gif", "heic", "svg"],
-            FileKind::Any => &[],
+            FileKind::Ext(e) => std::slice::from_ref(e),
         }
     }
 
     pub fn matches(&self, path: &Path) -> bool {
-        let exts = self.extensions();
-        if exts.is_empty() {
-            return true; // Any: every file matches
-        }
-        match path.extension().and_then(|e| e.to_str()) {
-            Some(ext) => exts.iter().any(|x| x.eq_ignore_ascii_case(ext)),
-            None => false, // file has no extension
-        }
+        path.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| {
+                self.extensions()
+                    .iter()
+                    .any(|x| x.eq_ignore_ascii_case(ext))
+            })
     }
 }
 
@@ -119,6 +150,8 @@ impl TimeRange {
     }
 }
 
+
+
 impl FileQuery {
     // The "Show specs" idea: every query can explain itself as a real command.
     pub fn to_find_command(&self) -> String {
@@ -126,16 +159,21 @@ impl FileQuery {
             .scope
             .roots()
             .iter()
-            .map(|p| format!("'{}'", p.display()))
+            .map(|p| shell_quote(&p.display().to_string()))
             .collect();
 
         let mut cmd = format!("find {} -type f -not -path '*/.*'", roots.join(" "));
 
-        let exts = self.kind.extensions();
+        let exts: Vec<&str> = self
+            .kinds
+            .iter()
+            .flat_map(|k| k.extensions().iter().copied())
+            .collect();
         if !exts.is_empty() {
             let parts: Vec<String> = exts.iter().map(|e| format!("-iname '*.{e}'")).collect();
             cmd.push_str(&format!(" \\( {} \\)", parts.join(" -o ")));
         }
+
         for term in &self.name_terms {
             cmd.push_str(&format!(" -iname '*{term}*'"));
         }
@@ -148,6 +186,10 @@ impl FileQuery {
         }
 
         cmd
+    }
+
+    pub fn matches_kind(&self, path: &Path) -> bool {
+        self.kinds.is_empty() || self.kinds.iter().any(|k| k.matches(path))
     }
 
     pub fn matches_name(&self, path: &Path) -> bool {
