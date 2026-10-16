@@ -1,9 +1,11 @@
 use adw::prelude::*;
-use findlich::{parse::parse, search::search};
+use findlich::{index::Index, parse::parse};
 use gtk::{gio, glib};
+use std::cell::RefCell;
 use std::path::Path;
+use std::rc::Rc;
 
-const APP_ID: &str = "dev.sinezero.CmdCenter";
+const APP_ID: &str = "io.github.jranand.Findlich";
 const MAX_RESULTS: usize = 50;
 
 const CSS: &str = "
@@ -61,7 +63,6 @@ fn file_row(path: &Path) -> adw::ActionRow {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    // Ask the system what kind of file this is, and use its standard icon.
     let (content_type, _) = gio::content_type_guess(Some(path), None::<&[u8]>);
     let icon = gtk::Image::builder()
         .gicon(&gio::content_type_get_icon(&content_type))
@@ -78,8 +79,69 @@ fn file_row(path: &Path) -> adw::ActionRow {
     row
 }
 
+/// The widgets that change while searching, bundled so closures need one clone.
+#[derive(Clone)]
+struct Ui {
+    list: gtk::ListBox,
+    stack: gtk::Stack,
+    status: adw::StatusPage,
+    count: gtk::Label,
+    command: gtk::Label,
+}
+
+fn show_status(ui: &Ui, title: &str, description: &str) {
+    ui.status.set_title(title);
+    ui.status.set_description(Some(description));
+    ui.stack.set_visible_child_name("status");
+}
+
+fn run_search(ui: &Ui, index: &Option<Index>, text: &str) {
+    while let Some(child) = ui.list.first_child() {
+        ui.list.remove(&child);
+    }
+    ui.count.set_label("");
+    ui.command.set_label("");
+
+    let Some(index) = index else {
+        show_status(ui, "Indexing your files…", "This only takes a moment");
+        return;
+    };
+    if text.trim().is_empty() {
+        show_status(
+            ui,
+            "Search your files",
+            "Try “pdf last week” or “photos yesterday”",
+        );
+        return;
+    }
+
+    let q = parse(text);
+    let cmd = q.to_find_command();
+    ui.command.set_label(&cmd);
+    ui.command.set_tooltip_text(Some(&cmd));
+
+    let results = index.search(&q);
+    for f in results.iter().take(MAX_RESULTS) {
+        ui.list.append(&file_row(&f.path));
+    }
+
+    ui.count.set_label(&match results.len() {
+        0 => "No files".to_string(),
+        1 => "1 file".to_string(),
+        n if n > MAX_RESULTS => format!("{MAX_RESULTS} of {n} files"),
+        n => format!("{n} files"),
+    });
+
+    if results.is_empty() {
+        show_status(ui, "No files found", "Try fewer words, or add “everywhere”");
+    } else {
+        ui.stack.set_visible_child_name("results");
+        ui.list.select_row(ui.list.row_at_index(0).as_ref());
+    }
+}
+
 fn build_ui(app: &adw::Application) {
-    // --- Search field ---
+    // --- Widgets ---
     let entry = gtk::SearchEntry::builder()
         .placeholder_text("Search files…")
         .css_classes(["launcher-search"])
@@ -87,7 +149,6 @@ fn build_ui(app: &adw::Application) {
         .margin_end(12)
         .build();
 
-    // --- Results, or a message when there are none ---
     let list = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::Single)
         .css_classes(["navigation-sidebar", "launcher-list"])
@@ -98,18 +159,14 @@ fn build_ui(app: &adw::Application) {
         .vexpand(true)
         .build();
 
-    let empty = adw::StatusPage::builder()
+    let status = adw::StatusPage::builder()
         .icon_name("system-search-symbolic")
-        .title("Search your files")
-        .description("Try “pdf last week” or “photos yesterday”")
         .build();
 
     let stack = gtk::Stack::new();
     stack.add_named(&scroller, Some("results"));
-    stack.add_named(&empty, Some("empty"));
-    stack.set_visible_child_name("empty");
+    stack.add_named(&status, Some("status"));
 
-    // --- Footer: count + the real command (Show specs) ---
     let count = gtk::Label::builder()
         .css_classes(["dim-label", "launcher-footer"])
         .build();
@@ -140,51 +197,45 @@ fn build_ui(app: &adw::Application) {
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("cmdcenter")
+        .title("Findlich")
         .default_width(680)
         .default_height(480)
         .resizable(false)
         .content(&content)
         .build();
 
-    // --- Enter: search ---
+    // --- State ---
+    let ui = Ui {
+        list,
+        stack,
+        status,
+        count,
+        command,
+    };
+    let index: Rc<RefCell<Option<Index>>> = Rc::new(RefCell::new(None));
+    run_search(&ui, &index.borrow(), ""); // shows "Indexing your files…"
+
+    // --- Build the index in the background ---
     {
-        let list = list.clone();
-        let stack = stack.clone();
-        let empty = empty.clone();
-        let count = count.clone();
-        let command = command.clone();
+        let ui = ui.clone();
+        let index = index.clone();
+        let entry = entry.clone();
+        glib::spawn_future_local(async move {
+            let built = gio::spawn_blocking(Index::build)
+                .await
+                .expect("indexing thread panicked");
+            *index.borrow_mut() = Some(built);
+            // Whatever the user typed while we were indexing, search it now.
+            run_search(&ui, &index.borrow(), &entry.text());
+        });
+    }
 
-        entry.connect_activate(move |entry| {
-            let q = parse(&entry.text());
-            let cmd = q.to_find_command();
-            command.set_label(&cmd);
-            command.set_tooltip_text(Some(&cmd)); // full command on hover
-
-            while let Some(child) = list.first_child() {
-                list.remove(&child);
-            }
-
-            let results = search(&q);
-            for path in results.iter().take(MAX_RESULTS) {
-                list.append(&file_row(path));
-            }
-
-            count.set_label(&match results.len() {
-                0 => "No files".to_string(),
-                1 => "1 file".to_string(),
-                n if n > MAX_RESULTS => format!("{MAX_RESULTS} of {n} files"),
-                n => format!("{n} files"),
-            });
-
-            if results.is_empty() {
-                empty.set_title("No files found");
-                empty.set_description(Some("Try fewer words, or add “everywhere”"));
-                stack.set_visible_child_name("empty");
-            } else {
-                stack.set_visible_child_name("results");
-                list.select_row(list.row_at_index(0).as_ref());
-            }
+    // --- Search as you type ---
+    {
+        let ui = ui.clone();
+        let index = index.clone();
+        entry.connect_search_changed(move |entry| {
+            run_search(&ui, &index.borrow(), &entry.text());
         });
     }
 
