@@ -176,15 +176,15 @@ pub fn parse(input: &str) -> FileQuery {
             || is_count
             || FILLER.contains(&word);
 
-        if let Some(k) = found_kind {
-            if !kinds.contains(&k) {
-                kinds.push(k);
-            }
+        if let Some(k) = found_kind
+            && !kinds.contains(&k)
+        {
+            kinds.push(k);
         }
-        if let Some(f) = found_folder {
-            if !folders.contains(&f) {
-                folders.push(f);
-            }
+        if let Some(f) = found_folder
+            && !folders.contains(&f)
+        {
+            folders.push(f);
         }
         everywhere |= is_everywhere;
         if let Some(t) = found_time {
@@ -218,7 +218,7 @@ pub fn parse(input: &str) -> FileQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::{FileKind, Scope, TimeRange};
+    use crate::query::{FileKind, Scope, TimeRange, UserFolder};
 
     #[test]
     fn pdf_last_week() {
@@ -227,5 +227,43 @@ mod tests {
         assert_eq!(q.time, TimeRange::LastWeek);
         assert_eq!(q.scope, Scope::UserFolders);
         assert!(q.name_terms.is_empty());
+    }
+    #[test]
+    fn photos_in_downloads() {
+        let q = parse("photos in downloads");
+        assert_eq!(q.kinds, vec![FileKind::Images]);
+        assert_eq!(q.scope, Scope::Folders(vec![UserFolder::Downloads]));
+    }
+
+    #[test]
+    fn pictures_alone_is_a_file_type() {
+        let q = parse("pictures");
+        assert_eq!(q.kinds, vec![FileKind::Images]);
+        assert_eq!(q.scope, Scope::UserFolders);
+    }
+
+    #[test]
+    fn in_pictures_is_a_folder() {
+        let q = parse("in pictures");
+        assert!(q.kinds.is_empty());
+        assert_eq!(q.scope, Scope::Folders(vec![UserFolder::Pictures]));
+    }
+
+    #[test]
+    fn jpg_is_an_exact_extension() {
+        let q = parse("jpg");
+        assert_eq!(q.kinds, vec![FileKind::Ext("jpg".into())]);
+    }
+
+    #[test]
+    fn number_with_unit_is_rolling_window() {
+        assert_eq!(parse("pdf 3 days").time, TimeRange::PastDays(3));
+    }
+
+    #[test]
+    fn number_without_unit_is_a_name_word() {
+        let q = parse("tax 2024");
+        assert_eq!(q.name_terms, vec!["tax", "2024"]);
+        assert_eq!(q.time, TimeRange::Any);
     }
 }

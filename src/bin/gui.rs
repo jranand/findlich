@@ -45,14 +45,14 @@ fn load_css() {
 /// "/home/jranand/Downloads/x.pdf" -> "~/Downloads"
 fn pretty_folder(path: &Path) -> String {
     let folder = path.parent().unwrap_or(path);
-    if let Some(home) = dirs::home_dir() {
-        if let Ok(rest) = folder.strip_prefix(&home) {
-            return if rest.as_os_str().is_empty() {
-                "~".to_string()
-            } else {
-                format!("~/{}", rest.display())
-            };
-        }
+    if let Some(home) = dirs::home_dir()
+        && let Ok(rest) = folder.strip_prefix(&home)
+    {
+        return if rest.as_os_str().is_empty() {
+            "~".to_string()
+        } else {
+            format!("~/{}", rest.display())
+        };
     }
     folder.display().to_string()
 }

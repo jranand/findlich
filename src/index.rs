@@ -72,10 +72,10 @@ fn skip_dir_reason(path: &Path, home: &Path) -> Option<&'static str> {
     if DEPENDENCY_DIRS.contains(&name) {
         return Some("dependencies");
     }
-    if let Ok(rel) = path.strip_prefix(home) {
-        if TOOL_DIRS.iter().any(|d| rel == Path::new(d)) {
-            return Some("tool data");
-        }
+    if let Ok(rel) = path.strip_prefix(home)
+        && TOOL_DIRS.iter().any(|d| rel == Path::new(d))
+    {
+        return Some("tool data");
     }
     if path.join("CACHEDIR.TAG").exists() {
         return Some("cache");
@@ -84,12 +84,11 @@ fn skip_dir_reason(path: &Path, home: &Path) -> Option<&'static str> {
         return Some("python environment");
     }
     for (dir, markers) in BUILD_DIRS {
-        if name == *dir {
-            if let Some(parent) = path.parent() {
-                if markers.iter().any(|m| parent.join(m).exists()) {
-                    return Some("build output");
-                }
-            }
+        if name == *dir
+            && let Some(parent) = path.parent()
+            && markers.iter().any(|m| parent.join(m).exists())
+        {
+            return Some("build output");
         }
     }
     None
@@ -116,10 +115,11 @@ impl Index {
 
         // User folders that live outside home, e.g. Documents on another drive.
         for folder in UserFolder::ALL {
-            if let Some(path) = folder.path() {
-                if !path.starts_with(&home) && path.is_dir() {
-                    walker.add(path);
-                }
+            if let Some(path) = folder.path()
+                && !path.starts_with(&home)
+                && path.is_dir()
+            {
+                walker.add(path);
             }
         }
 
@@ -134,10 +134,10 @@ impl Index {
 
         if let Some(config) = dirs::config_dir() {
             let user_rules = config.join("findlich/ignore");
-            if user_rules.exists() {
-                if let Some(err) = walker.add_ignore(&user_rules) {
-                    eprintln!("findlich: problem reading {}: {err}", user_rules.display());
-                }
+            if user_rules.exists()
+                && let Some(err) = walker.add_ignore(&user_rules)
+            {
+                eprintln!("findlich: problem reading {}: {err}", user_rules.display());
             }
         }
 
@@ -185,7 +185,7 @@ impl Index {
             });
         }
 
-        files.sort_by(|a, b| b.modified.cmp(&a.modified));
+        files.sort_by_key(|f| std::cmp::Reverse(f.modified));
 
         let mut skipped = std::mem::take(&mut *skipped.lock().unwrap());
         if unreadable > 0 {
@@ -196,6 +196,10 @@ impl Index {
 
     pub fn len(&self) -> usize {
         self.files.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
     }
 
     pub fn skipped(&self) -> &BTreeMap<&'static str, usize> {
