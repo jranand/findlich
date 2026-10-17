@@ -226,3 +226,65 @@ impl FileQuery {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parse a moment like "2026-10-14T15:30[Asia/Kolkata]".
+    fn at(s: &str) -> Zoned {
+        s.parse().unwrap()
+    }
+
+    /// The pinned "now": Wednesday 14 Oct 2026, mid-afternoon.
+    fn wednesday() -> Zoned {
+        at("2026-10-14T15:30[Asia/Kolkata]")
+    }
+
+    #[test]
+    fn any_has_no_range() {
+        assert_eq!(TimeRange::Any.range(&wednesday()), None);
+    }
+
+    #[test]
+    fn yesterday_is_midnight_to_midnight() {
+        assert_eq!(
+            TimeRange::Yesterday.range(&wednesday()),
+            Some((at("2026-10-13T00:00[Asia/Kolkata]"), at("2026-10-14T00:00[Asia/Kolkata]")))
+        );
+    }
+
+    #[test]
+    fn last_week_runs_monday_to_monday() {
+        assert_eq!(
+            TimeRange::LastWeek.range(&wednesday()),
+            Some((at("2026-10-05T00:00[Asia/Kolkata]"), at("2026-10-12T00:00[Asia/Kolkata]")))
+        );
+    }
+
+    #[test]
+    fn last_month_is_the_whole_previous_month() {
+        assert_eq!(
+            TimeRange::LastMonth.range(&wednesday()),
+            Some((at("2026-09-01T00:00[Asia/Kolkata]"), at("2026-10-01T00:00[Asia/Kolkata]")))
+        );
+    }
+
+    #[test]
+    fn last_month_in_january_is_previous_december() {
+        let january = at("2026-01-15T10:00[Asia/Kolkata]");
+        assert_eq!(
+            TimeRange::LastMonth.range(&january),
+            Some((at("2025-12-01T00:00[Asia/Kolkata]"), at("2026-01-01T00:00[Asia/Kolkata]")))
+        );
+    }
+
+    #[test]
+    fn past_days_is_a_rolling_window_ending_now() {
+        assert_eq!(
+            TimeRange::PastDays(3).range(&wednesday()),
+            Some((at("2026-10-11T15:30[Asia/Kolkata]"), wednesday()))
+        );
+    }
+}
