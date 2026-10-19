@@ -149,11 +149,9 @@ fn run_search(ui: &Ui, index: &Option<Index>, text: &str) {
 }
 
 /// Open a file with the desktop's default app. Never executes it.
-fn open_path(path: &Path, ctx: &gtk::gdk::AppLaunchContext) {
+fn open_path(path: &Path, ctx: &gtk::gdk::AppLaunchContext) -> Result<(), glib::Error> {
     let uri = gio::File::for_path(path).uri();
-    if let Err(err) = gio::AppInfo::launch_default_for_uri(&uri, Some(ctx)) {
-        eprintln!("findlich: could not open {}: {err}", path.display());
-    }
+    gio::AppInfo::launch_default_for_uri(&uri, Some(ctx))
 }
 
 fn build_ui(app: &adw::Application) {
@@ -211,13 +209,16 @@ fn build_ui(app: &adw::Application) {
     content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     content.append(&footer);
 
+    let toasts = adw::ToastOverlay::new();
+    toasts.set_child(Some(&content));
+
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("Findlich")
         .default_width(680)
         .default_height(480)
         .resizable(false)
-        .content(&content)
+        .content(&toasts)
         .build();
 
     // --- State ---
@@ -258,12 +259,21 @@ fn build_ui(app: &adw::Application) {
 
     {
         let paths = ui.paths.clone();
+        let toasts = toasts.clone();
         ui.list.connect_row_activated(move |_, row| {
             let Ok(i) = usize::try_from(row.index()) else {
                 return;
             };
-            if let Some(path) = paths.borrow().get(i) {
-                open_path(path, &row.display().app_launch_context());
+            let Some(path) = paths.borrow().get(i).cloned() else {
+                return;
+            };
+
+            if !path.exists() {
+                toasts.add_toast(adw::Toast::new("This file was moved or deleted"));
+                return;
+            }
+            if open_path(&path, &row.display().app_launch_context()).is_err() {
+                toasts.add_toast(adw::Toast::new("No app could open this file"));
             }
         });
     }
