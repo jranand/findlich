@@ -125,10 +125,12 @@ fn run_search(ui: &Ui, index: &Option<Index>, text: &str) {
     ui.command.set_tooltip_text(Some(&cmd));
 
     let result = index.search(&q, &plan, MAX_RESULTS);
-    let mut paths = ui.paths.borrow_mut();
-    for f in &result.matches {
-        ui.list.append(&file_row(&f.path));
-        paths.push(f.path.clone());
+    {
+        let mut paths = ui.paths.borrow_mut();
+        for f in &result.matches {
+            ui.list.append(&file_row(&f.path));
+            paths.push(f.path.clone());
+        }
     }
 
     ui.count.set_label(&match result.total {
