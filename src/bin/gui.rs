@@ -2,7 +2,7 @@ use adw::prelude::*;
 use findlich::{index::Index, parse::parse};
 use gtk::{gio, glib};
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 const APP_ID: &str = "io.github.jranand.Findlich";
@@ -74,6 +74,7 @@ fn file_row(path: &Path) -> adw::ActionRow {
         .subtitle(glib::markup_escape_text(&pretty_folder(path)))
         .title_lines(1)
         .subtitle_lines(1)
+        .activatable(true)
         .build();
     row.add_prefix(&icon);
     row
@@ -87,6 +88,7 @@ struct Ui {
     status: adw::StatusPage,
     count: gtk::Label,
     command: gtk::Label,
+    paths: Rc<RefCell<Vec<PathBuf>>>,
 }
 
 fn show_status(ui: &Ui, title: &str, description: &str) {
@@ -99,6 +101,7 @@ fn run_search(ui: &Ui, index: &Option<Index>, text: &str) {
     while let Some(child) = ui.list.first_child() {
         ui.list.remove(&child);
     }
+    ui.paths.borrow_mut().clear();
     ui.count.set_label("");
     ui.command.set_label("");
 
@@ -122,8 +125,10 @@ fn run_search(ui: &Ui, index: &Option<Index>, text: &str) {
     ui.command.set_tooltip_text(Some(&cmd));
 
     let result = index.search(&q, &plan, MAX_RESULTS);
+    let mut paths = ui.paths.borrow_mut();
     for f in &result.matches {
         ui.list.append(&file_row(&f.path));
+        paths.push(f.path.clone());
     }
 
     ui.count.set_label(&match result.total {
@@ -212,6 +217,7 @@ fn build_ui(app: &adw::Application) {
         status,
         count,
         command,
+        paths: Rc::new(RefCell::new(Vec::new())),
     };
     let index: Rc<RefCell<Option<Index>>> = Rc::new(RefCell::new(None));
     run_search(&ui, &index.borrow(), ""); // shows "Indexing your files…"
@@ -240,6 +246,17 @@ fn build_ui(app: &adw::Application) {
         });
     }
 
+    {
+        let paths = ui.paths.clone();
+        ui.list.connect_row_activated(move |_, row| {
+            let Ok(i) = usize::try_from(row.index()) else {
+                return;
+            };
+            if let Some(path) = paths.borrow().get(i) {
+                eprintln!("would open: {}", path.display());
+            }
+        });
+    }
     // --- Esc: close ---
     {
         let window = window.clone();
