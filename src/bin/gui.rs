@@ -146,6 +146,14 @@ fn run_search(ui: &Ui, index: &Option<Index>, text: &str) {
     }
 }
 
+/// Open a file with the desktop's default app. Never executes it.
+fn open_path(path: &Path, ctx: &gtk::gdk::AppLaunchContext) {
+    let uri = gio::File::for_path(path).uri();
+    if let Err(err) = gio::AppInfo::launch_default_for_uri(&uri, Some(ctx)) {
+        eprintln!("findlich: could not open {}: {err}", path.display());
+    }
+}
+
 fn build_ui(app: &adw::Application) {
     // --- Widgets ---
     let entry = gtk::SearchEntry::builder()
@@ -253,7 +261,7 @@ fn build_ui(app: &adw::Application) {
                 return;
             };
             if let Some(path) = paths.borrow().get(i) {
-                eprintln!("would open: {}", path.display());
+                open_path(path, &row.display().app_launch_context());
             }
         });
     }
